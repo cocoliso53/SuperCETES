@@ -1,0 +1,19 @@
+# Node build output
+node_modules
+dist
+
+# Vite cache
+.vite
+
+# Env files
+.env
+.env.*
+
+# Editor artifacts
+.DS_Store
+*.log
+*.lock
+.idea
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
