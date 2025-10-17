@@ -84,3 +84,97 @@ export async function sendPaymentOnMainnet(
  * );
  * ```
  */
+
+/**
+ * Sends a payment for a non-native Stellar asset (credit asset).
+ *
+ * Requirements:
+ * - The sender must hold the asset and have a sufficient balance.
+ * - The recipient must have a trustline to the asset issuer.
+ *
+ * @param sourceSecret - Secret key for the funding account.
+ * @param destinationPublicKey - Recipient public key.
+ * @param assetCode - Asset code (1-12 chars).
+ * @param assetIssuerPublicKey - Issuer public key.
+ * @param amount - Amount to transfer, as a string (e.g. '25.75').
+ */
+export async function sendAssetPaymentOnMainnet(
+  sourceSecret: string,
+  destinationPublicKey: string,
+  assetCode: string,
+  assetIssuerPublicKey: string,
+  amount: string
+): Promise<void> {
+  const server = new Horizon.Server(HORIZON_MAINNET_URL);
+  const sourceKeypair = Keypair.fromSecret(sourceSecret);
+  const sourceAccountResponse = await server.loadAccount(sourceKeypair.publicKey());
+
+  const asset = new Asset(assetCode, assetIssuerPublicKey);
+
+  const transaction = new TransactionBuilder(
+    sourceAccountResponse,
+    {
+      fee: BASE_FEE,
+      networkPassphrase: Networks.PUBLIC
+    }
+  )
+    .addOperation(
+      Operation.payment({
+        destination: destinationPublicKey,
+        asset,
+        amount
+      })
+    )
+    .setTimeout(60)
+    .build();
+
+  transaction.sign(sourceKeypair);
+
+  const result = await server.submitTransaction(transaction);
+  console.log(`Asset payment (${assetCode}) succeeded on mainnet:`, result);
+}
+
+/**
+ * Creates or updates a trustline for the given asset on behalf of the account
+ * identified by `accountSecret`. Horizon enforces that the asset exists and the
+ * asset code/issuer combination is valid. If the trustline already exists, this
+ * call will adjust its limit.
+ *
+ * @param accountSecret - Secret key of the account establishing the trustline.
+ * @param assetCode - Asset code (1-12 characters).
+ * @param assetIssuerPublicKey - Issuer public key for the asset.
+ * @param limit - Optional limit for the trustline; defaults to max value.
+ */
+export async function createTrustlineOnMainnet(
+  accountSecret: string,
+  assetCode: string,
+  assetIssuerPublicKey: string,
+  limit?: string
+): Promise<void> {
+  const server = new Horizon.Server(HORIZON_MAINNET_URL);
+  const accountKeypair = Keypair.fromSecret(accountSecret);
+  const accountResponse = await server.loadAccount(accountKeypair.publicKey());
+
+  const asset = new Asset(assetCode, assetIssuerPublicKey);
+
+  const transaction = new TransactionBuilder(
+    accountResponse,
+    {
+      fee: BASE_FEE,
+      networkPassphrase: Networks.PUBLIC
+    }
+  )
+    .addOperation(
+      Operation.changeTrust({
+        asset,
+        limit
+      })
+    )
+    .setTimeout(60)
+    .build();
+
+  transaction.sign(accountKeypair);
+
+  const result = await server.submitTransaction(transaction);
+  console.log(`Trustline established/updated for ${assetCode}:`, result);
+}
