@@ -21,6 +21,7 @@ import {
   Networks,
   Asset,
   Operation,
+  StrKey,
   TransactionBuilder
 } from 'stellar-sdk';
 
@@ -47,13 +48,10 @@ export async function sendPaymentOnMainnet(
   const sourceAccountResponse = await server.loadAccount(sourceKeypair.publicKey());
 
   // 3. Build the payment transaction. Adjust timeouts/operations as needed.
-  const transaction = new TransactionBuilder(
-    sourceAccountResponse,
-    {
-      fee: BASE_FEE,
-      networkPassphrase: Networks.PUBLIC
-    }
-  )
+  const transaction = new TransactionBuilder(sourceAccountResponse, {
+    fee: BASE_FEE,
+    networkPassphrase: Networks.PUBLIC
+  })
     .addOperation(
       Operation.payment({
         destination: destinationPublicKey,
@@ -68,7 +66,7 @@ export async function sendPaymentOnMainnet(
   transaction.sign(sourceKeypair);
 
   // 5. Submit the signed XDR back to the public network.
-  const result = await server.submitTransaction(transaction);
+  const result = await submitTransactionWithContext(server, transaction);
   console.log('Transaction succeeded on mainnet:', result);
 }
 
@@ -111,13 +109,10 @@ export async function sendAssetPaymentOnMainnet(
 
   const asset = new Asset(assetCode, assetIssuerPublicKey);
 
-  const transaction = new TransactionBuilder(
-    sourceAccountResponse,
-    {
-      fee: BASE_FEE,
-      networkPassphrase: Networks.PUBLIC
-    }
-  )
+  const transaction = new TransactionBuilder(sourceAccountResponse, {
+    fee: BASE_FEE,
+    networkPassphrase: Networks.PUBLIC
+  })
     .addOperation(
       Operation.payment({
         destination: destinationPublicKey,
@@ -130,7 +125,7 @@ export async function sendAssetPaymentOnMainnet(
 
   transaction.sign(sourceKeypair);
 
-  const result = await server.submitTransaction(transaction);
+  const result = await submitTransactionWithContext(server, transaction);
   console.log(`Asset payment (${assetCode}) succeeded on mainnet:`, result);
 }
 
@@ -151,19 +146,20 @@ export async function createTrustlineOnMainnet(
   assetIssuerPublicKey: string,
   limit?: string
 ): Promise<void> {
+  if (!StrKey.isValidEd25519PublicKey(assetIssuerPublicKey)) {
+    throw new Error('Asset issuer must be a valid Stellar public key (G...).');
+  }
+
   const server = new Horizon.Server(HORIZON_MAINNET_URL);
   const accountKeypair = Keypair.fromSecret(accountSecret);
   const accountResponse = await server.loadAccount(accountKeypair.publicKey());
 
   const asset = new Asset(assetCode, assetIssuerPublicKey);
 
-  const transaction = new TransactionBuilder(
-    accountResponse,
-    {
-      fee: BASE_FEE,
-      networkPassphrase: Networks.PUBLIC
-    }
-  )
+  const transaction = new TransactionBuilder(accountResponse, {
+    fee: BASE_FEE,
+    networkPassphrase: Networks.PUBLIC
+  })
     .addOperation(
       Operation.changeTrust({
         asset,
@@ -175,6 +171,102 @@ export async function createTrustlineOnMainnet(
 
   transaction.sign(accountKeypair);
 
-  const result = await server.submitTransaction(transaction);
+  const result = await submitTransactionWithContext(server, transaction);
   console.log(`Trustline established/updated for ${assetCode}:`, result);
+}
+const parseAxiosError = (error: unknown): string | null => {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'isAxiosError' in error &&
+    (error as { isAxiosError: boolean }).isAxiosError
+  ) {
+    const axiosErr = error as {
+      response?: { status: number; statusText?: string; data?: unknown };
+      message?: string;
+    };
+
+    const status = axiosErr.response?.status;
+    const statusText = axiosErr.response?.statusText;
+    const message = axiosErr.message ?? 'Request failed';
+    const data = axiosErr.response?.data;
+
+    const parts = [
+      status ? `HTTP ${status}` : null,
+      statusText || null,
+      message || null,
+      data ? `Response: ${JSON.stringify(data)}` : null
+    ].filter(Boolean);
+
+    return parts.length > 0 ? parts.join(' – ') : 'Network request failed (Axios).';
+  }
+
+  return null;
+};
+
+const parseHorizonError = (error: unknown): string | null => {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    'status' in (error as Record<string, unknown>)
+  ) {
+    try {
+      const response = (error as { response: Record<string, unknown> }).response;
+      const status = response?.status as number | undefined;
+      const title = (response?.data as { title?: string })?.title;
+      const detail = (response?.data as { detail?: string })?.detail;
+      const extras = (response?.data as { extras?: Record<string, unknown> })?.extras;
+
+      const horizonParts = [
+        status ? `Horizon HTTP ${status}` : null,
+        title || null,
+        detail || null,
+        extras ? `Extras: ${JSON.stringify(extras)}` : null
+      ].filter(Boolean);
+
+      if (horizonParts.length > 0) {
+        return horizonParts.join(' – ');
+      }
+    } catch {
+      /* ignore parsing errors */
+    }
+  }
+
+  return null;
+};
+
+export const formatStellarError = (error: unknown, fallbackMessage: string): string => {
+  const axiosInfo = parseAxiosError(error);
+  const horizonInfo = parseHorizonError(error);
+
+  if (axiosInfo || horizonInfo) {
+    return [axiosInfo, horizonInfo].filter(Boolean).join(' | ');
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as { message?: unknown }).message === 'string'
+  ) {
+    return String((error as { message?: unknown }).message);
+  }
+
+  return fallbackMessage;
+};
+
+async function submitTransactionWithContext(
+  server: Horizon.Server,
+  transaction: ReturnType<TransactionBuilder['build']>
+) {
+  try {
+    return await server.submitTransaction(transaction);
+  } catch (error) {
+    throw new Error(formatStellarError(error, 'Transaction failed.'));
+  }
 }

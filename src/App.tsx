@@ -1,14 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLoginWithEmail, usePrivy } from '@privy-io/react-auth';
 import { Keypair } from 'stellar-sdk';
-import { sendPaymentOnMainnet } from './stellarMainnetExample';
+import {
+  sendAssetPaymentOnMainnet,
+  sendPaymentOnMainnet,
+  createTrustlineOnMainnet,
+  formatStellarError
+} from './stellarMainnetExample';
 
-const stellarSecret = import.meta.env.VITE_STELLAR_SECRET_KEY || 'notworking';
+const stellarSecret = import.meta.env.VITE_STELLAR_SECRET_KEY ?? '';
 
 type WalletDetails = {
   publicKey: string;
   secretKey: string;
-}
+};
 
 const App = () => {
   const { ready, authenticated, user, logout } = usePrivy();
@@ -21,6 +26,18 @@ const App = () => {
   const [sendCodeInFlight, setSendCodeInFlight] = useState(false);
   const [loginInFlight, setLoginInFlight] = useState(false);
   const [logoutInFlight, setLogoutInFlight] = useState(false);
+  const [nativeDestination, setNativeDestination] = useState('');
+  const [nativeAmount, setNativeAmount] = useState('');
+  const [assetDestination, setAssetDestination] = useState('');
+  const [assetCode, setAssetCode] = useState('');
+  const [assetIssuer, setAssetIssuer] = useState('');
+  const [assetAmount, setAssetAmount] = useState('');
+  const [trustAssetCode, setTrustAssetCode] = useState('');
+  const [trustAssetIssuer, setTrustAssetIssuer] = useState('');
+  const [trustLimit, setTrustLimit] = useState('');
+  const [operationInFlight, setOperationInFlight] = useState<
+    'native' | 'asset' | 'trust' | null
+  >(null);
 
   useEffect(() => {
     if (!ready || !authenticated || wallet) {
@@ -37,7 +54,11 @@ const App = () => {
         return;
       }
 
-      console.log("stellarSecret", stellarSecret)
+      if (!stellarSecret) {
+        setError('Missing VITE_STELLAR_SECRET_KEY. Update your .env.local file.');
+        setInfo(null);
+        return;
+      }
 
       try {
         const keypair = Keypair.fromSecret(stellarSecret);
@@ -50,7 +71,6 @@ const App = () => {
           secretKey: keypair.secret()
         });
         setInfo('Local Stellar wallet created.');
-        sendPaymentOnMainnet(stellarSecret, "GCWCHO4WJPZRN2TMSLCGEXIGXAWGSO6NLEJYSJI7CIVGUUUUJDMWCRBU", "0.5")
       } catch (err) {
         console.error('Unable to create fallback Stellar wallet', err);
         setError('Unable to create a Stellar wallet. Please retry.');
@@ -62,7 +82,7 @@ const App = () => {
     return () => {
       cancelled = true;
     };
-  }, [ready, authenticated, wallet]);
+  }, [ready, authenticated, wallet, stellarSecret]);
 
   useEffect(() => {
     if (!authenticated) {
@@ -84,7 +104,7 @@ const App = () => {
       setInfo('Code sent! Check your inbox for the verification email.');
     } catch (err) {
       console.error('Unable to send verification code', err);
-      setError('Unable to send a code. Double-check the email and try again.');
+      setError(formatStellarError(err, 'Unable to send a code. Double-check the email and try again.'));
     } finally {
       setSendCodeInFlight(false);
     }
@@ -103,7 +123,7 @@ const App = () => {
       await loginWithCode({ code });
     } catch (err) {
       console.error('Unable to log in with verification code', err);
-      setError('Unable to log in. Verify the code and try again.');
+      setError(formatStellarError(err, 'Unable to log in. Verify the code and try again.'));
     } finally {
       setLoginInFlight(false);
     }
@@ -124,13 +144,108 @@ const App = () => {
       setCode('');
     } catch (err) {
       console.error('Unable to sign out', err);
-      setError('Unable to sign out. Please retry.');
+      setError(formatStellarError(err, 'Unable to sign out. Please retry.'));
     } finally {
       setLogoutInFlight(false);
     }
   };
 
   const disableLogout = !ready || (ready && !authenticated) || logoutInFlight;
+  const operationsDisabled = useMemo(
+    () => !stellarSecret || !wallet || operationInFlight !== null,
+    [stellarSecret, wallet, operationInFlight]
+  );
+
+  const handleSendNative = async () => {
+    if (!stellarSecret) {
+      setError('Missing VITE_STELLAR_SECRET_KEY. Update your .env.local file.');
+      return;
+    }
+    if (!nativeDestination.trim() || !nativeAmount.trim()) {
+      setError('Destination and amount are required for XLM payments.');
+      return;
+    }
+
+    setError(null);
+    setInfo('Submitting XLM payment to Horizon…');
+    setOperationInFlight('native');
+    try {
+      await sendPaymentOnMainnet(stellarSecret, nativeDestination.trim(), nativeAmount.trim());
+      setInfo('XLM payment submitted. Check Horizon for confirmation.');
+    } catch (err) {
+      console.error('Failed to send XLM payment', err);
+      setInfo(null);
+      setError(formatStellarError(err, 'Unable to send XLM payment. Inspect console for details.'));
+    } finally {
+      setOperationInFlight(null);
+    }
+  };
+
+  const handleSendAsset = async () => {
+    if (!stellarSecret) {
+      setError('Missing VITE_STELLAR_SECRET_KEY. Update your .env.local file.');
+      return;
+    }
+    if (
+      !assetDestination.trim() ||
+      !assetCode.trim() ||
+      !assetIssuer.trim() ||
+      !assetAmount.trim()
+    ) {
+      setError('Destination, asset code, issuer, and amount are required for asset payments.');
+      return;
+    }
+
+    setError(null);
+    setInfo(`Submitting ${assetCode.trim()} payment…`);
+    setOperationInFlight('asset');
+    try {
+      await sendAssetPaymentOnMainnet(
+        stellarSecret,
+        assetDestination.trim(),
+        assetCode.trim(),
+        assetIssuer.trim(),
+        assetAmount.trim()
+      );
+      setInfo(`${assetCode.trim()} payment submitted. Check Horizon for confirmation.`);
+    } catch (err) {
+      console.error('Failed to send asset payment', err);
+      setInfo(null);
+      setError(formatStellarError(err, 'Unable to send asset payment. Inspect console for details.'));
+    } finally {
+      setOperationInFlight(null);
+    }
+  };
+
+  const handleCreateTrustline = async () => {
+    if (!stellarSecret) {
+      setError('Missing VITE_STELLAR_SECRET_KEY. Update your .env.local file.');
+      return;
+    }
+    if (!trustAssetCode.trim() || !trustAssetIssuer.trim()) {
+      setError('Asset code and issuer are required to create a trustline.');
+      return;
+    }
+
+    setError(null);
+    setInfo(`Creating trustline for ${trustAssetCode.trim()}…`);
+    setOperationInFlight('trust');
+    try {
+      await createTrustlineOnMainnet(
+        stellarSecret,
+        trustAssetCode.trim(),
+        trustAssetIssuer.trim(),
+        trustLimit.trim() || undefined
+      );
+      setInfo(`Trustline for ${trustAssetCode.trim()} submitted. Check Horizon for confirmation.`);
+    } catch (err) {
+      console.error('Failed to create trustline', err);
+      setInfo(null);
+      setError(formatStellarError(err, 'Unable to create trustline. Inspect console for details.'));
+    } finally {
+      setOperationInFlight(null);
+    }
+  };
 
   return (
     <main className="app">
@@ -212,6 +327,134 @@ const App = () => {
             ) : (
               <p className="status">Creating your Stellar wallet...</p>
             )}
+
+            <div className="actions">
+              <div className="action-card">
+                <h3>Send XLM</h3>
+                <div className="input-group">
+                  <label htmlFor="native-destination">Destination public key</label>
+                  <input
+                    id="native-destination"
+                    type="text"
+                    placeholder="G..."
+                    value={nativeDestination}
+                    onChange={(e) => setNativeDestination(e.currentTarget.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="native-amount">Amount (XLM)</label>
+                  <input
+                    id="native-amount"
+                    type="text"
+                    placeholder="10.5"
+                    value={nativeAmount}
+                    onChange={(e) => setNativeAmount(e.currentTarget.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleSendNative}
+                  disabled={operationsDisabled || operationInFlight === 'native'}
+                >
+                  {operationInFlight === 'native' ? 'Sending XLM…' : 'Send XLM Payment'}
+                </button>
+              </div>
+
+              <div className="action-card">
+                <h3>Send Asset</h3>
+                <div className="input-group">
+                  <label htmlFor="asset-destination">Destination public key</label>
+                  <input
+                    id="asset-destination"
+                    type="text"
+                    placeholder="G..."
+                    value={assetDestination}
+                    onChange={(e) => setAssetDestination(e.currentTarget.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="asset-code">Asset code</label>
+                  <input
+                    id="asset-code"
+                    type="text"
+                    placeholder="USDC"
+                    value={assetCode}
+                    onChange={(e) => setAssetCode(e.currentTarget.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="asset-issuer">Asset issuer</label>
+                  <input
+                    id="asset-issuer"
+                    type="text"
+                    placeholder="G...ISSUER"
+                    value={assetIssuer}
+                    onChange={(e) => setAssetIssuer(e.currentTarget.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="asset-amount">Amount</label>
+                  <input
+                    id="asset-amount"
+                    type="text"
+                    placeholder="25.75"
+                    value={assetAmount}
+                    onChange={(e) => setAssetAmount(e.currentTarget.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleSendAsset}
+                  disabled={operationsDisabled || operationInFlight === 'asset'}
+                >
+                  {operationInFlight === 'asset' ? 'Sending asset…' : 'Send Asset Payment'}
+                </button>
+              </div>
+
+              <div className="action-card">
+                <h3>Create Trustline</h3>
+                <div className="input-group">
+                  <label htmlFor="trust-asset-code">Asset code</label>
+                  <input
+                    id="trust-asset-code"
+                    type="text"
+                    placeholder="USDC"
+                    value={trustAssetCode}
+                    onChange={(e) => setTrustAssetCode(e.currentTarget.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="trust-asset-issuer">Asset issuer</label>
+                  <input
+                    id="trust-asset-issuer"
+                    type="text"
+                    placeholder="G...ISSUER"
+                    value={trustAssetIssuer}
+                    onChange={(e) => setTrustAssetIssuer(e.currentTarget.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="trust-limit">Limit (optional)</label>
+                  <input
+                    id="trust-limit"
+                    type="text"
+                    placeholder="Leave blank for max"
+                    value={trustLimit}
+                    onChange={(e) => setTrustLimit(e.currentTarget.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleCreateTrustline}
+                  disabled={operationsDisabled || operationInFlight === 'trust'}
+                >
+                  {operationInFlight === 'trust' ? 'Creating trustline…' : 'Create Trustline'}
+                </button>
+              </div>
+            </div>
 
             <button
               type="button"
