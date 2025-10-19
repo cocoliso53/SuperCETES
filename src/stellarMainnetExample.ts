@@ -22,10 +22,15 @@ import {
   Asset,
   Operation,
   StrKey,
-  TransactionBuilder
+  TransactionBuilder,
+  xdr, 
+  SorobanRpc
 } from 'stellar-sdk';
 
+import { PoolContract, RequestType } from '@blend-capital/blend-sdk';
+
 const HORIZON_MAINNET_URL = 'https://horizon.stellar.org';
+const SOROBAN_RPC_URL = 'https://mainnet.sorobanrpc.com';
 
 /**
  * Builds, signs, and submits a simple payment from the supplied source account
@@ -40,14 +45,11 @@ export async function sendPaymentOnMainnet(
   destinationPublicKey: string,
   amount: string
 ): Promise<void> {
-  // 1. Connect to the public Horizon server.
   const server = new Horizon.Server(HORIZON_MAINNET_URL);
 
-  // 2. Derive the source Keypair and load the up-to-date account state.
   const sourceKeypair = Keypair.fromSecret(sourceSecret);
   const sourceAccountResponse = await server.loadAccount(sourceKeypair.publicKey());
 
-  // 3. Build the payment transaction. Adjust timeouts/operations as needed.
   const transaction = new TransactionBuilder(sourceAccountResponse, {
     fee: BASE_FEE,
     networkPassphrase: Networks.PUBLIC
@@ -59,29 +61,14 @@ export async function sendPaymentOnMainnet(
         amount
       })
     )
-    .setTimeout(60) // Fail if not submitted within 60 seconds.
+    .setTimeout(60)
     .build();
 
-  // 4. Sign with the source account secret so Horizon can verify authenticity.
   transaction.sign(sourceKeypair);
 
-  // 5. Submit the signed XDR back to the public network.
   const result = await submitTransactionWithContext(server, transaction);
   console.log('Transaction succeeded on mainnet:', result);
 }
-
-/**
- * Example invocation (commented out). Replace the placeholders with real keys
- * and amounts when ready, then call the function from an async context.
- *
- * ```
- * await sendPaymentOnMainnet(
- *   process.env.STELLAR_SECRET!,
- *   'G...DESTINATION_PUBLIC_KEY...',
- *   '10.5'
- * );
- * ```
- */
 
 /**
  * Sends a payment for a non-native Stellar asset (credit asset).
@@ -89,12 +76,6 @@ export async function sendPaymentOnMainnet(
  * Requirements:
  * - The sender must hold the asset and have a sufficient balance.
  * - The recipient must have a trustline to the asset issuer.
- *
- * @param sourceSecret - Secret key for the funding account.
- * @param destinationPublicKey - Recipient public key.
- * @param assetCode - Asset code (1-12 chars).
- * @param assetIssuerPublicKey - Issuer public key.
- * @param amount - Amount to transfer, as a string (e.g. '25.75').
  */
 export async function sendAssetPaymentOnMainnet(
   sourceSecret: string,
@@ -131,14 +112,7 @@ export async function sendAssetPaymentOnMainnet(
 
 /**
  * Creates or updates a trustline for the given asset on behalf of the account
- * identified by `accountSecret`. Horizon enforces that the asset exists and the
- * asset code/issuer combination is valid. If the trustline already exists, this
- * call will adjust its limit.
- *
- * @param accountSecret - Secret key of the account establishing the trustline.
- * @param assetCode - Asset code (1-12 characters).
- * @param assetIssuerPublicKey - Issuer public key for the asset.
- * @param limit - Optional limit for the trustline; defaults to max value.
+ * identified by `accountSecret`.
  */
 export async function createTrustlineOnMainnet(
   accountSecret: string,
@@ -174,6 +148,7 @@ export async function createTrustlineOnMainnet(
   const result = await submitTransactionWithContext(server, transaction);
   console.log(`Trustline established/updated for ${assetCode}:`, result);
 }
+
 const parseAxiosError = (error: unknown): string | null => {
   if (
     typeof error === 'object' &&
@@ -269,4 +244,50 @@ async function submitTransactionWithContext(
   } catch (error) {
     throw new Error(formatStellarError(error, 'Transaction failed.'));
   }
+}
+
+export async function SupplyOp(
+  sourceSecret: string,
+  poolId: string,
+  asset: string,
+  amount: bigint
+): Promise<void> {
+  const horizonServer = new Horizon.Server(HORIZON_MAINNET_URL);
+  const sorobanServer = new SorobanRpc.Server(SOROBAN_RPC_URL);
+  
+  const keypair = Keypair.fromSecret(sourceSecret);
+  const account = await horizonServer.loadAccount(keypair.publicKey());
+
+  const poolContract = new PoolContract(poolId);
+
+  const supplyOpBase64 = poolContract.submit({
+    from: keypair.publicKey(),
+    spender: keypair.publicKey(),
+    to: keypair.publicKey(),
+    requests: [
+      {
+        amount,
+        request_type: RequestType.SupplyCollateral,
+        address: asset
+      }
+    ]
+  });
+
+  const supplyOperation = xdr.Operation.fromXDR(supplyOpBase64, 'base64');
+
+  let transaction = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: Networks.PUBLIC
+  })
+    .addOperation(supplyOperation)
+    .setTimeout(60)
+    .build();
+
+  // Simulate and prepare the transaction
+  transaction = await sorobanServer.prepareTransaction(transaction);
+
+  transaction.sign(keypair);
+
+  const result = await sorobanServer.sendTransaction(transaction);
+  console.log('Supply operation submitted:', result);
 }

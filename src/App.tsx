@@ -5,6 +5,7 @@ import {
   sendAssetPaymentOnMainnet,
   sendPaymentOnMainnet,
   createTrustlineOnMainnet,
+  SupplyOp,
   formatStellarError
 } from './stellarMainnetExample';
 
@@ -35,8 +36,11 @@ const App = () => {
   const [trustAssetCode, setTrustAssetCode] = useState('');
   const [trustAssetIssuer, setTrustAssetIssuer] = useState('');
   const [trustLimit, setTrustLimit] = useState('');
+  const [supplyPoolId, setSupplyPoolId] = useState('CCCCIQSDILITHMM7PBSLVDT5MISSY7R26MNZXCX4H7J5JQ5FPIYOGYFS');
+  const [supplyAsset, setSupplyAsset] = useState('CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75');
+  const [supplyAmount, setSupplyAmount] = useState('');
   const [operationInFlight, setOperationInFlight] = useState<
-    'native' | 'asset' | 'trust' | null
+    'native' | 'asset' | 'trust' | 'supply' | null
   >(null);
 
   useEffect(() => {
@@ -247,6 +251,41 @@ const App = () => {
     }
   };
 
+  const handleSupply = async () => {
+    if (!stellarSecret) {
+      setError('Missing VITE_STELLAR_SECRET_KEY. Update your .env.local file.');
+      return;
+    }
+
+    if (!supplyPoolId.trim() || !supplyAsset.trim() || !supplyAmount.trim()) {
+      setError('Pool ID, asset address, and amount are required to supply collateral.');
+      return;
+    }
+
+    let parsedAmount: bigint;
+    try {
+      parsedAmount = BigInt(supplyAmount.trim());
+    } catch {
+      setError('Amount must be a valid integer (in the smallest units expected by the contract).');
+      return;
+    }
+
+    setError(null);
+    setInfo('Submitting supply operation…');
+    setOperationInFlight('supply');
+
+    try {
+      await SupplyOp(stellarSecret, supplyPoolId.trim(), supplyAsset.trim(), parsedAmount);
+      setInfo('Supply operation submitted. Check Horizon for confirmation.');
+    } catch (err) {
+      console.error('Failed to submit supply operation', err);
+      setInfo(null);
+      setError(formatStellarError(err, 'Unable to submit supply operation. Inspect console for details.'));
+    } finally {
+      setOperationInFlight(null);
+    }
+  };
+
   return (
     <main className="app">
       <section className="card">
@@ -452,6 +491,48 @@ const App = () => {
                   disabled={operationsDisabled || operationInFlight === 'trust'}
                 >
                   {operationInFlight === 'trust' ? 'Creating trustline…' : 'Create Trustline'}
+                </button>
+              </div>
+
+              <div className="action-card">
+                <h3>Supply Collateral</h3>
+                <div className="input-group">
+                  <label htmlFor="supply-pool-id">Pool ID</label>
+                  <input
+                    id="supply-pool-id"
+                    type="text"
+                    placeholder="Pool contract ID"
+                    value={supplyPoolId}
+                    onChange={(e) => setSupplyPoolId(e.currentTarget.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="supply-asset">Asset address</label>
+                  <input
+                    id="supply-asset"
+                    type="text"
+                    placeholder="Asset contract/address"
+                    value={supplyAsset}
+                    onChange={(e) => setSupplyAsset(e.currentTarget.value)}
+                  />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="supply-amount">Amount (integer)</label>
+                  <input
+                    id="supply-amount"
+                    type="text"
+                    placeholder="10000000"
+                    value={supplyAmount}
+                    onChange={(e) => setSupplyAmount(e.currentTarget.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={handleSupply}
+                  disabled={operationsDisabled || operationInFlight === 'supply'}
+                >
+                  {operationInFlight === 'supply' ? 'Supplying…' : 'Submit Supply Operation'}
                 </button>
               </div>
             </div>
