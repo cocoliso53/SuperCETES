@@ -246,12 +246,12 @@ async function submitTransactionWithContext(
   }
 }
 
-export async function SupplyOp(
+export const InteractPoolOp = (supply: boolean) => 
+  async (
   sourceSecret: string,
   poolId: string,
   asset: string,
-  amount: bigint
-): Promise<void> {
+  amount: bigint): Promise<void> => {
   const horizonServer = new Horizon.Server(HORIZON_MAINNET_URL);
   const sorobanServer = new SorobanRpc.Server(SOROBAN_RPC_URL);
   
@@ -267,7 +267,7 @@ export async function SupplyOp(
     requests: [
       {
         amount,
-        request_type: RequestType.SupplyCollateral,
+        request_type: supply? RequestType.SupplyCollateral : RequestType.WithdrawCollateral,
         address: asset
       }
     ]
@@ -290,4 +290,8 @@ export async function SupplyOp(
 
   const result = await sorobanServer.sendTransaction(transaction);
   console.log('Supply operation submitted:', result);
+  console.log("TxHash", result.hash)
 }
+
+export const SupplyOp = InteractPoolOp(true)
+export const WithdrawalOp = InteractPoolOp(false)
