@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLoginWithEmail, usePrivy } from '@privy-io/react-auth';
 import { Keypair } from 'stellar-sdk';
 import {
   sendAssetPaymentOnMainnet,
   sendPaymentOnMainnet,
   createTrustlineOnMainnet,
-  SupplyOp,
-  WithdrawalOp,
+  supplyOp,
+  withdrawalOp,
+  poolData,
   formatStellarError
 } from './stellarMainnetExample';
 
@@ -46,6 +47,16 @@ const App = () => {
   const [operationInFlight, setOperationInFlight] = useState<
     'native' | 'asset' | 'trust' | 'supply' | 'withdraw' | null
   >(null);
+  const [poolInfo, setPoolInfo] = useState<string>('');
+  const [poolMetrics, setPoolMetrics] = useState<
+    { totalSupplied: number; netApy: number; supplyApy: number } | null
+  >(null);
+  const [poolDataInFlight, setPoolDataInFlight] = useState(false);
+  const [showPoolDetails, setShowPoolDetails] = useState(false);
+
+  const formatNumber = (value: number) =>
+    value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  const formatPercent = (value: number) => `${(value * 100).toFixed(2)}%`;
 
   useEffect(() => {
     if (!ready || !authenticated || wallet) {
@@ -255,6 +266,57 @@ const App = () => {
     }
   };
 
+  const fetchPoolSnapshot = useCallback(async (silent = false) => {
+    if (!stellarSecret) {
+      setError('Missing VITE_STELLAR_SECRET_KEY. Update your .env.local file.');
+      return;
+    }
+
+    if (!silent) {
+      setInfo('Loading pool data...');
+    }
+    setPoolDataInFlight(true);
+
+    try {
+      const keypair = Keypair.fromSecret(stellarSecret);
+      const rawData = await poolData(
+        'CCCCIQSDILITHMM7PBSLVDT5MISSY7R26MNZXCX4H7J5JQ5FPIYOGYFS',
+        keypair.publicKey()
+      );
+
+      const replacer = (_key: string, value: unknown) =>
+        typeof value === 'bigint' ? value.toString() : value;
+      setPoolInfo(JSON.stringify(rawData, replacer, 2));
+
+      const { userEstimate } = rawData;
+      if (userEstimate) {
+        setPoolMetrics({
+          totalSupplied: Number(userEstimate.totalSupplied ?? 0),
+          netApy: Number(userEstimate.netApy ?? 0),
+          supplyApy: Number(userEstimate.supplyApy ?? 0)
+        });
+      }
+
+      if (!silent) {
+        setInfo('Pool data loaded.');
+      }
+    } catch (err) {
+      console.error('Unable to load pool data', err);
+      setPoolInfo('');
+      setPoolMetrics(null);
+      setInfo(null);
+      setError(formatStellarError(err, 'Unable to load pool data. Inspect console for details.'));
+    } finally {
+      setPoolDataInFlight(false);
+    }
+  }, [stellarSecret]);
+
+  useEffect(() => {
+    if (wallet && stellarSecret) {
+      void fetchPoolSnapshot(true);
+    }
+  }, [wallet, stellarSecret, fetchPoolSnapshot]);
+
   const handleSupply = async () => {
     if (!stellarSecret) {
       setError('Missing VITE_STELLAR_SECRET_KEY. Update your .env.local file.');
@@ -279,8 +341,9 @@ const App = () => {
     setOperationInFlight('supply');
 
     try {
-      await SupplyOp(stellarSecret, supplyPoolId.trim(), supplyAsset.trim(), parsedAmount);
+      await supplyOp(stellarSecret, supplyPoolId.trim(), supplyAsset.trim(), parsedAmount);
       setInfo('Supply operation submitted. Check Horizon for confirmation.');
+      await fetchPoolSnapshot(true);
     } catch (err) {
       console.error('Failed to submit supply operation', err);
       setInfo(null);
@@ -314,8 +377,9 @@ const App = () => {
     setOperationInFlight('withdraw');
 
     try {
-      await WithdrawalOp(stellarSecret, withdrawPoolId.trim(), withdrawAsset.trim(), parsedAmount);
+      await withdrawalOp(stellarSecret, withdrawPoolId.trim(), withdrawAsset.trim(), parsedAmount);
       setInfo('Withdrawal operation submitted. Check Horizon for confirmation.');
+      await fetchPoolSnapshot(true);
     } catch (err) {
       console.error('Failed to submit withdrawal operation', err);
       setInfo(null);
@@ -325,6 +389,10 @@ const App = () => {
     } finally {
       setOperationInFlight(null);
     }
+  };
+
+  const handleFetchPoolData = async () => {
+    await fetchPoolSnapshot(false);
   };
 
   return (
@@ -407,6 +475,55 @@ const App = () => {
             ) : (
               <p className="status">Creating your Stellar wallet...</p>
             )}
+
+            <div className="metrics-card">
+              <div className="metrics-header">
+                <h2>Pool Snapshot</h2>
+                <div className="metrics-actions">
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={handleFetchPoolData}
+                    disabled={poolDataInFlight}
+                  >
+                    {poolDataInFlight ? 'Refreshing…' : 'Refresh'}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => setShowPoolDetails((prev) => !prev)}
+                    disabled={poolDataInFlight || !poolInfo}
+                  >
+                    {showPoolDetails ? 'Hide Raw Data' : 'Show Raw Data'}
+                  </button>
+                </div>
+              </div>
+              {poolMetrics ? (
+                <div className="metrics-grid">
+                  <div className="metric">
+                    <span className="metrics-label">Total Supplied</span>
+                    <span className="metrics-value">
+                      {formatNumber(poolMetrics.totalSupplied)} USDC
+                    </span>
+                  </div>
+                  <div className="metric">
+                    <span className="metrics-label">Net APY</span>
+                    <span className="metrics-value">{formatPercent(poolMetrics.netApy)}</span>
+                  </div>
+                  <div className="metric">
+                    <span className="metrics-label">Supply APY</span>
+                    <span className="metrics-value">{formatPercent(poolMetrics.supplyApy)}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="metrics-placeholder">
+                  Pool data not available yet. Refresh to try again.
+                </p>
+              )}
+              {showPoolDetails && poolInfo && (
+                <pre className="pool-data">{poolInfo}</pre>
+              )}
+            </div>
 
             <div className="actions">
               <div className="action-card">
@@ -618,6 +735,7 @@ const App = () => {
                   {operationInFlight === 'withdraw' ? 'Withdrawing…' : 'Submit Withdrawal Operation'}
                 </button>
               </div>
+
             </div>
 
             <button

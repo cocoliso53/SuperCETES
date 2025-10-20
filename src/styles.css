@@ -196,3 +196,72 @@ input:focus {
   color: #dc2626;
   font-weight: 600;
 }
+
+.metrics-card {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 1rem;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.metrics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.metrics-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.metrics-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+}
+
+.metric {
+  flex: 1 1 160px;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem;
+  background: #fff;
+  border-radius: 0.85rem;
+  border: 1px solid #e0e7ff;
+}
+
+.metrics-label {
+  font-size: 0.85rem;
+  color: #4b5563;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.metrics-value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.metrics-placeholder {
+  margin: 0;
+  color: #4b5563;
+}
+
+.pool-data {
+  margin: 0;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: #1f2937;
+  color: #f9fafb;
+  overflow-x: auto;
+  font-size: 0.85rem;
+}

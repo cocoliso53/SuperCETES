@@ -24,10 +24,16 @@ import {
   StrKey,
   TransactionBuilder,
   xdr, 
-  SorobanRpc
+  SorobanRpc,
 } from 'stellar-sdk';
 
-import { PoolContract, RequestType } from '@blend-capital/blend-sdk';
+import {
+  PoolContract,
+  RequestType,
+  PoolV2,
+  Positions,
+  PositionsEstimate
+} from '@blend-capital/blend-sdk';
 
 const HORIZON_MAINNET_URL = 'https://horizon.stellar.org';
 const SOROBAN_RPC_URL = 'https://mainnet.sorobanrpc.com';
@@ -246,7 +252,7 @@ async function submitTransactionWithContext(
   }
 }
 
-export const InteractPoolOp = (supply: boolean) => 
+export const interactPoolOp = (supply: boolean) => 
   async (
   sourceSecret: string,
   poolId: string,
@@ -293,5 +299,24 @@ export const InteractPoolOp = (supply: boolean) =>
   console.log("TxHash", result.hash)
 }
 
-export const SupplyOp = InteractPoolOp(true)
-export const WithdrawalOp = InteractPoolOp(false)
+export const supplyOp = interactPoolOp(true)
+export const withdrawalOp = interactPoolOp(false)
+
+export const poolData = async (poolId: string, userId: string) => {
+  const network = {
+    rpc: SOROBAN_RPC_URL,
+    passphrase: Networks.PUBLIC
+  }
+
+  const pool = await PoolV2.load(network, poolId)
+  const poolOracle = await pool.loadOracle()
+  const poolUser = await pool.loadUser(userId)
+  const userEstimate = PositionsEstimate.build(pool, poolOracle, poolUser.positions)
+
+  return {
+    pool, 
+    poolOracle,
+    poolUser,
+    userEstimate
+  }
+}
