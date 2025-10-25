@@ -265,3 +265,42 @@ input:focus {
   overflow-x: auto;
   font-size: 0.85rem;
 }
+
+.balances-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.balances-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.balance-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.balance-asset {
+  font-size: 0.95rem;
+  color: #475569;
+}
+
+.balance-amount {
+  font-family: 'Source Code Pro', monospace;
+  font-size: 1rem;
+}

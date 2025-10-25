@@ -8,6 +8,7 @@ import {
   supplyOp,
   withdrawalOp,
   poolData,
+  fetchWalletBalances,
   formatStellarError
 } from './stellarMainnetExample';
 
@@ -53,6 +54,10 @@ const App = () => {
   >(null);
   const [poolDataInFlight, setPoolDataInFlight] = useState(false);
   const [showPoolDetails, setShowPoolDetails] = useState(false);
+  const [walletBalances, setWalletBalances] = useState<
+    { assetType: string; assetCode?: string; assetIssuer?: string; balance: string; liquidityPoolId?: string }[]
+  >([]);
+  const [balancesInFlight, setBalancesInFlight] = useState(false);
 
   const formatNumber = (value: number) =>
     value.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -311,11 +316,40 @@ const App = () => {
     }
   }, [stellarSecret]);
 
+  const fetchBalances = useCallback(async (silent = false) => {
+    if (!stellarSecret) {
+      setError('Missing VITE_STELLAR_SECRET_KEY. Update your .env.local file.');
+      return;
+    }
+
+    if (!silent) {
+      setInfo('Loading wallet balances...');
+    }
+    setBalancesInFlight(true);
+
+    try {
+      const keypair = Keypair.fromSecret(stellarSecret);
+      const balances = await fetchWalletBalances(keypair.publicKey());
+      setWalletBalances(balances);
+      if (!silent) {
+        setInfo('Wallet balances loaded.');
+      }
+    } catch (err) {
+      console.error('Unable to load wallet balances', err);
+      setWalletBalances([]);
+      setInfo(null);
+      setError(formatStellarError(err, 'Unable to load wallet balances. Inspect console for details.'));
+    } finally {
+      setBalancesInFlight(false);
+    }
+  }, [stellarSecret]);
+
   useEffect(() => {
     if (wallet && stellarSecret) {
       void fetchPoolSnapshot(true);
+      void fetchBalances(true);
     }
-  }, [wallet, stellarSecret, fetchPoolSnapshot]);
+  }, [wallet, stellarSecret, fetchPoolSnapshot, fetchBalances]);
 
   const handleSupply = async () => {
     if (!stellarSecret) {
@@ -344,6 +378,7 @@ const App = () => {
       await supplyOp(stellarSecret, supplyPoolId.trim(), supplyAsset.trim(), parsedAmount);
       setInfo('Supply operation submitted. Check Horizon for confirmation.');
       await fetchPoolSnapshot(true);
+      await fetchBalances(true);
     } catch (err) {
       console.error('Failed to submit supply operation', err);
       setInfo(null);
@@ -380,6 +415,7 @@ const App = () => {
       await withdrawalOp(stellarSecret, withdrawPoolId.trim(), withdrawAsset.trim(), parsedAmount);
       setInfo('Withdrawal operation submitted. Check Horizon for confirmation.');
       await fetchPoolSnapshot(true);
+      await fetchBalances(true);
     } catch (err) {
       console.error('Failed to submit withdrawal operation', err);
       setInfo(null);
@@ -522,6 +558,46 @@ const App = () => {
               )}
               {showPoolDetails && poolInfo && (
                 <pre className="pool-data">{poolInfo}</pre>
+              )}
+            </div>
+
+            <div className="balances-card">
+              <div className="metrics-header">
+                <h2>Wallet Balances</h2>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => void fetchBalances(false)}
+                  disabled={balancesInFlight}
+                >
+                  {balancesInFlight ? 'Refreshing…' : 'Refresh'}
+                </button>
+              </div>
+              {walletBalances.length > 0 ? (
+                <ul className="balances-list">
+                  {walletBalances.map((balance) => {
+                    const label =
+                      balance.assetType === 'native'
+                        ? 'XLM'
+                        : balance.assetType === 'liquidity_pool_shares'
+                        ? `LP Shares (${balance.liquidityPoolId?.slice(0, 6)}…)`
+                        : `${balance.assetCode} · ${balance.assetIssuer?.slice(0, 6)}…`;
+
+                    return (
+                      <li
+                        key={`${balance.assetType}-${balance.assetCode ?? ''}-${balance.liquidityPoolId ?? ''}`}
+                        className="balance-item"
+                      >
+                        <span className="balance-asset">{label}</span>
+                        <span className="balance-amount">
+                          {Number(balance.balance).toLocaleString()}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="metrics-placeholder">No balances to display yet.</p>
               )}
             </div>
 

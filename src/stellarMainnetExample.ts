@@ -306,17 +306,54 @@ export const poolData = async (poolId: string, userId: string) => {
   const network = {
     rpc: SOROBAN_RPC_URL,
     passphrase: Networks.PUBLIC
-  }
+  };
 
-  const pool = await PoolV2.load(network, poolId)
-  const poolOracle = await pool.loadOracle()
-  const poolUser = await pool.loadUser(userId)
-  const userEstimate = PositionsEstimate.build(pool, poolOracle, poolUser.positions)
+  const pool = await PoolV2.load(network, poolId);
+  const poolOracle = await pool.loadOracle();
+  const poolUser = await pool.loadUser(userId);
+  const userEstimate = PositionsEstimate.build(pool, poolOracle, poolUser.positions);
 
   return {
-    pool, 
+    pool,
     poolOracle,
     poolUser,
     userEstimate
-  }
-}
+  };
+};
+
+export type WalletBalance = {
+  assetType: string;
+  assetCode?: string;
+  assetIssuer?: string;
+  balance: string;
+  liquidityPoolId?: string;
+};
+
+export const fetchWalletBalances = async (publicKey: string): Promise<WalletBalance[]> => {
+  const server = new Horizon.Server(HORIZON_MAINNET_URL);
+  const account = await server.loadAccount(publicKey);
+
+  return account.balances.map((balance) => {
+    if (balance.asset_type === 'liquidity_pool_shares') {
+      return {
+        assetType: balance.asset_type,
+        balance: balance.balance,
+        liquidityPoolId: balance.liquidity_pool_id
+      };
+    }
+
+    if (balance.asset_type === 'native') {
+      return {
+        assetType: balance.asset_type,
+        balance: balance.balance
+      };
+    }
+
+    return {
+      assetType: balance.asset_type,
+      assetCode: balance.asset_code,
+      assetIssuer: balance.asset_issuer,
+      balance: balance.balance
+    };
+  });
+};
